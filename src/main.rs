@@ -21,11 +21,17 @@ fn main() {
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                let stream = Arc::new(Mutex::new(stream));
+            Ok(mut stream) => {
                 thread::spawn(move || {
-                    let response = extract_url(&mut stream.lock().unwrap());
-                    stream.lock().unwrap().write_all(&response).unwrap();
+                    loop {
+                        let response = extract_url(&mut stream);
+
+                        if response.is_empty() {
+                            break;
+                        }
+
+                        stream.write_all(&response).unwrap();
+                    }
                 });
             }
             Err(e) => {
