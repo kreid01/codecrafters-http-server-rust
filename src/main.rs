@@ -1,9 +1,13 @@
+use std::fs::{File, read_to_string};
 use std::io::{Read, Write};
 #[allow(unused_imports)]
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{env, thread};
+
+// remove unwrap -> proper handling * options
+// get rid of clones
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -38,20 +42,47 @@ fn extract_url(stream: &mut TcpStream) -> String {
 
     let request = get_request(parts);
 
-    println!("{:?}", request);
-
     match request.target.as_str() {
         "/" => format!("{} 200 OK\r\n\r\n", request.version),
         "/echo" => response_200(request.clone(), &request.body.clone()),
         "/user-agent" => response_200(request.clone(), &request.headers.user_agent.clone()),
-        _ => format!("{} 404 Not Found\r\n\r\n", request.version),
+        "/files" => file_response(request.clone()),
+        _ => not_found(request.version),
+    }
+}
+
+fn not_found(version: String) -> String {
+    format!("{} 404 Not Found\r\n\r\n", version)
+}
+
+fn file_response(request: HTTPRequest) -> String {
+    let directory = get_directory();
+    match directory {
+        Some(dir) => {
+            let path = format!("{}{}", dir, request.body);
+            let mut buf = String::new();
+            let file = File::open(path);
+
+            match file {
+                Ok(mut file) => {
+                    let mut request = request;
+                    request.content_type = "application/octet-stream".to_string();
+
+                    File::read_to_string(&mut file, &mut buf).unwrap();
+                    response_200(request, &buf)
+                }
+                Err(_) => not_found(request.version),
+            }
+        }
+        None => not_found(request.version),
     }
 }
 
 fn response_200(request: HTTPRequest, body: &String) -> String {
     format!(
-        "{} 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+        "{} 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
         request.version,
+        request.content_type,
         body.len(),
         body
     )
@@ -78,24 +109,32 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
 
     let version = request_parts.get(2).unwrap();
 
-    println!("{:?}", headers_parts);
-
     let host = headers_parts.get(1).unwrap();
     let user_agent = agent_parts.get(1).unwrap_or(&"").to_string();
 
     let headers = HTTPHeaders {
         host: host.to_string(),
         user_agent,
-        accept: "".to_string(),
     };
 
     HTTPRequest {
         method: HTTPMethod::Get,
         target,
+        content_type: "text/plain".to_string(),
         version: version.to_string(),
         headers,
         body,
     }
+}
+
+fn get_directory() -> Option<String> {
+    let variables: Vec<String> = env::args().collect();
+
+    if let Some(index) = variables.iter().position(|v| v == "--directory") {
+        return Some(variables.get(index + 1).unwrap().to_string());
+    }
+
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +142,7 @@ struct HTTPRequest {
     method: HTTPMethod,
     target: String,
     version: String,
+    content_type: String,
     headers: HTTPHeaders,
     body: String,
 }
@@ -116,5 +156,5 @@ enum HTTPMethod {
 struct HTTPHeaders {
     host: String,
     user_agent: String,
-    accept: String,
+    // accept: String,
 }
