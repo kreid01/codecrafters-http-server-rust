@@ -1,8 +1,10 @@
+use std::fmt::format;
 use std::fs::{File, read_to_string};
 use std::io::{Read, Write};
 #[allow(unused_imports)]
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::num::ParseIntError;
 use std::sync::{Arc, Mutex};
 use std::{env, thread};
 
@@ -60,22 +62,36 @@ fn file_response(request: HTTPRequest) -> String {
     match directory {
         Some(dir) => {
             let path = format!("{}{}", dir, request.body);
-            let mut buf = String::new();
-            let file = File::open(path);
-
-            match file {
-                Ok(mut file) => {
-                    let mut request = request;
-                    request.content_type = "application/octet-stream".to_string();
-
-                    File::read_to_string(&mut file, &mut buf).unwrap();
-                    response_200(request, &buf)
-                }
-                Err(_) => not_found(request.version),
+            match request.method {
+                HTTPMethod::Get => get_file_response(request, path),
+                HTTPMethod::Post => create_file_response(request, path),
             }
         }
         None => not_found(request.version),
     }
+}
+
+fn get_file_response(request: HTTPRequest, path: String) -> String {
+    let mut buf = String::new();
+    let file = File::open(path);
+
+    match file {
+        Ok(mut file) => {
+            let mut request = request;
+            request.content_type = "application/octet-stream".to_string();
+
+            File::read_to_string(&mut file, &mut buf).unwrap();
+            response_200(request, &buf)
+        }
+        Err(_) => not_found(request.version),
+    }
+}
+
+fn create_file_response(request: HTTPRequest, path: String) -> String {
+    let mut file = File::create(path).unwrap();
+    file.write_all(&request.content.into_bytes()).unwrap();
+
+    format!("{} 201 Created\r\n\r\n", request.version)
 }
 
 fn response_200(request: HTTPRequest, body: &String) -> String {
@@ -89,17 +105,17 @@ fn response_200(request: HTTPRequest, body: &String) -> String {
 }
 
 fn get_request(parts: Vec<&str>) -> HTTPRequest {
-    println!("{:?}", parts);
-
     let request = parts.first().unwrap();
     let headers = parts.get(1).unwrap();
     let agent = parts.get(2).unwrap();
+    let content = parts.get(5).unwrap_or(&"").to_string();
 
     let request_parts: Vec<&str> = request.split_whitespace().collect();
     let headers_parts: Vec<&str> = headers.split_whitespace().collect();
     let agent_parts: Vec<&str> = agent.split_whitespace().collect();
 
-    let _method = request_parts.first().unwrap();
+    let method = request_parts.first().unwrap();
+    let method = get_http_method(method);
 
     let target = request_parts.get(1).unwrap();
     let target_parts: Vec<&str> = target.split('/').collect();
@@ -112,18 +128,28 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     let host = headers_parts.get(1).unwrap();
     let user_agent = agent_parts.get(1).unwrap_or(&"").to_string();
 
+    println!("{:?}", content);
+
     let headers = HTTPHeaders {
         host: host.to_string(),
         user_agent,
     };
 
     HTTPRequest {
-        method: HTTPMethod::Get,
+        method,
         target,
         content_type: "text/plain".to_string(),
         version: version.to_string(),
         headers,
         body,
+        content,
+    }
+}
+
+fn get_http_method(method: &str) -> HTTPMethod {
+    match method.to_lowercase().as_str() {
+        "post" => HTTPMethod::Post,
+        _ => HTTPMethod::Get,
     }
 }
 
@@ -145,11 +171,13 @@ struct HTTPRequest {
     content_type: String,
     headers: HTTPHeaders,
     body: String,
+    content: String,
 }
 
 #[derive(Debug, Clone)]
 enum HTTPMethod {
     Get,
+    Post,
 }
 
 #[derive(Debug, Clone)]
