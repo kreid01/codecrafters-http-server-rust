@@ -2,16 +2,25 @@ use std::io::{Read, Write};
 #[allow(unused_imports)]
 use std::net::TcpListener;
 use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
 
     for stream in listener.incoming() {
         match stream {
-            Ok(mut stream) => {
-                let response = extract_url(&mut stream);
-                println!("{}", response);
-                stream.write_all(response.as_bytes()).unwrap();
+            Ok(stream) => {
+                let stream = Arc::new(Mutex::new(stream));
+                thread::spawn(move || {
+                    let response = extract_url(&mut stream.lock().unwrap());
+                    println!("{}", response);
+                    stream
+                        .lock()
+                        .unwrap()
+                        .write_all(response.as_bytes())
+                        .unwrap();
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -28,6 +37,8 @@ fn extract_url(stream: &mut TcpStream) -> String {
     let parts: Vec<&str> = request_str.split("\r\n").collect();
 
     let request = get_request(parts);
+
+    println!("{:?}", request);
 
     match request.target.as_str() {
         "/" => format!("{} 200 OK\r\n\r\n", request.version),
