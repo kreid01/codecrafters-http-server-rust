@@ -3,7 +3,7 @@ pub struct HTTPRequest {
     pub method: HTTPMethod,
     pub target: String,
     pub version: String,
-    pub content_type: String,
+    pub content_type: Option<String>,
     pub headers: HTTPHeaders,
     pub body: String,
     pub content: String,
