@@ -1,12 +1,12 @@
-use std::fmt::format;
-use std::fs::{File, read_to_string};
+use std::fs::File;
 use std::io::{Read, Write};
-#[allow(unused_imports)]
 use std::net::TcpListener;
 use std::net::TcpStream;
-use std::num::ParseIntError;
 use std::sync::{Arc, Mutex};
 use std::{env, thread};
+mod structs;
+
+use crate::structs::{HTTPHeaders, HTTPMethod, HTTPRequest};
 
 // remove unwrap -> proper handling * options
 // get rid of clones
@@ -90,15 +90,20 @@ fn get_file_response(request: HTTPRequest, path: String) -> String {
 fn create_file_response(request: HTTPRequest, path: String) -> String {
     let mut file = File::create(path).unwrap();
     file.write_all(&request.content.into_bytes()).unwrap();
-
     format!("{} 201 Created\r\n\r\n", request.version)
 }
 
 fn response_200(request: HTTPRequest, body: &String) -> String {
+    let encoding = match request.encoding {
+        Some(encoding) if encoding == "gzip" => format!("Content-Encoding: {}\r\n", encoding),
+        _ => "".to_string(),
+    };
+
     format!(
-        "{} 200 OK\r\nContent-Type: {}\r\nContent-Length: {}\r\n\r\n{}",
+        "{} 200 OK\r\nContent-Type: {}\r\n{}Content-Length: {}\r\n\r\n{}",
         request.version,
         request.content_type,
+        encoding,
         body.len(),
         body
     )
@@ -123,12 +128,12 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     let target = format!("/{}", target_parts.get(1).unwrap_or(&""));
     let body = target_parts.get(2).unwrap_or(&"").to_string();
 
+    let encoding = get_request_property(parts, "Accept-Encoding");
+
     let version = request_parts.get(2).unwrap();
 
     let host = headers_parts.get(1).unwrap();
     let user_agent = agent_parts.get(1).unwrap_or(&"").to_string();
-
-    println!("{:?}", content);
 
     let headers = HTTPHeaders {
         host: host.to_string(),
@@ -143,7 +148,19 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
         headers,
         body,
         content,
+        encoding,
     }
+}
+
+fn get_request_property(parts: Vec<&str>, property: &str) -> Option<String> {
+    for part in parts {
+        if part.contains(property) {
+            let replace = format!("{}: ", property);
+            return Some(part.replace(&replace, ""));
+        }
+    }
+
+    None
 }
 
 fn get_http_method(method: &str) -> HTTPMethod {
@@ -161,28 +178,4 @@ fn get_directory() -> Option<String> {
     }
 
     None
-}
-
-#[derive(Debug, Clone)]
-struct HTTPRequest {
-    method: HTTPMethod,
-    target: String,
-    version: String,
-    content_type: String,
-    headers: HTTPHeaders,
-    body: String,
-    content: String,
-}
-
-#[derive(Debug, Clone)]
-enum HTTPMethod {
-    Get,
-    Post,
-}
-
-#[derive(Debug, Clone)]
-struct HTTPHeaders {
-    host: String,
-    user_agent: String,
-    // accept: String,
 }
