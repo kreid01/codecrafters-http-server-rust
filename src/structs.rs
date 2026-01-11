@@ -8,6 +8,7 @@ pub struct HTTPRequest {
     pub body: String,
     pub content: String,
     pub encoding: Option<String>,
+    pub connection: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -18,7 +19,6 @@ pub enum HTTPMethod {
 
 #[derive(Debug, Clone)]
 pub struct HTTPHeaders {
-    pub host: String,
+    pub _host: String,
     pub user_agent: String,
-    // accept: String,
 }

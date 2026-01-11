@@ -2,7 +2,6 @@ use std::fs::File;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::net::TcpStream;
-use std::sync::{Arc, Mutex};
 use std::{env, thread};
 mod structs;
 
@@ -25,12 +24,14 @@ fn main() {
                 thread::spawn(move || {
                     loop {
                         let response = extract_url(&mut stream);
+                        stream.write_all(&response).unwrap();
 
-                        if response.is_empty() {
+                        let response_string =
+                            String::from_utf8(response).expect("Our bytes should be valid utf8");
+
+                        if response_string.contains("Connection: close") {
                             break;
                         }
-
-                        stream.write_all(&response).unwrap();
                     }
                 });
             }
@@ -49,6 +50,8 @@ fn extract_url(stream: &mut TcpStream) -> Vec<u8> {
     let parts: Vec<&str> = request_str.split("\r\n").collect();
 
     let request = get_request(parts);
+
+    println!("{:?}", request);
 
     match request.target.as_str() {
         "/" => format!("{} 200 OK\r\n\r\n", request.version).into_bytes(),
@@ -116,9 +119,15 @@ fn response_200(request: HTTPRequest, body: &String) -> Vec<u8> {
         }
     };
 
+    let connection = match request.connection {
+        Some(status) => format!("Connection: {}\r\n", status),
+        None => "".to_string(),
+    };
+
     let headers = format!(
-        "{} 200 OK\r\nContent-Type: {}\r\n{}Content-Length: {}\r\n\r\n",
+        "{} 200 OK\r\n{}Content-Type: {}\r\n{}Content-Length: {}\r\n\r\n",
         request.version,
+        connection,
         request.content_type,
         encoding,
         body.len(),
@@ -148,7 +157,8 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     let target = format!("/{}", target_parts.get(1).unwrap_or(&""));
     let body = target_parts.get(2).unwrap_or(&"").to_string();
 
-    let encoding = get_request_property(parts, "Accept-Encoding");
+    let encoding = get_request_property(&parts, "Accept-Encoding");
+    let connection = get_request_property(&parts, "Connection");
 
     let version = request_parts.get(2).unwrap();
 
@@ -156,7 +166,7 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     let user_agent = agent_parts.get(1).unwrap_or(&"").to_string();
 
     let headers = HTTPHeaders {
-        host: host.to_string(),
+        _host: host.to_string(),
         user_agent,
     };
 
@@ -165,6 +175,7 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
         target,
         content_type: "text/plain".to_string(),
         version: version.to_string(),
+        connection,
         headers,
         body,
         content,
@@ -172,7 +183,7 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     }
 }
 
-fn get_request_property(parts: Vec<&str>, property: &str) -> Option<String> {
+fn get_request_property(parts: &Vec<&str>, property: &str) -> Option<String> {
     for part in parts {
         if part.contains(property) {
             let replace = format!("{}: ", property);
