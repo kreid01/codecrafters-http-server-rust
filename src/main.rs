@@ -6,10 +6,15 @@ use std::sync::{Arc, Mutex};
 use std::{env, thread};
 mod structs;
 
+use flate2::Compression;
+use flate2::write::GzEncoder;
+
 use crate::structs::{HTTPHeaders, HTTPMethod, HTTPRequest};
 
 // remove unwrap -> proper handling * options
 // get rid of clones
+// structure
+// parser method
 
 fn main() {
     let listener = TcpListener::bind("127.0.0.1:4221").unwrap();
@@ -20,12 +25,7 @@ fn main() {
                 let stream = Arc::new(Mutex::new(stream));
                 thread::spawn(move || {
                     let response = extract_url(&mut stream.lock().unwrap());
-                    println!("{}", response);
-                    stream
-                        .lock()
-                        .unwrap()
-                        .write_all(response.as_bytes())
-                        .unwrap();
+                    stream.lock().unwrap().write_all(&response).unwrap();
                 });
             }
             Err(e) => {
@@ -35,7 +35,7 @@ fn main() {
     }
 }
 
-fn extract_url(stream: &mut TcpStream) -> String {
+fn extract_url(stream: &mut TcpStream) -> Vec<u8> {
     let mut buf = [0; 1024];
     let bytes_read = stream.read(&mut buf).unwrap();
 
@@ -45,7 +45,7 @@ fn extract_url(stream: &mut TcpStream) -> String {
     let request = get_request(parts);
 
     match request.target.as_str() {
-        "/" => format!("{} 200 OK\r\n\r\n", request.version),
+        "/" => format!("{} 200 OK\r\n\r\n", request.version).into_bytes(),
         "/echo" => response_200(request.clone(), &request.body.clone()),
         "/user-agent" => response_200(request.clone(), &request.headers.user_agent.clone()),
         "/files" => file_response(request.clone()),
@@ -53,11 +53,11 @@ fn extract_url(stream: &mut TcpStream) -> String {
     }
 }
 
-fn not_found(version: String) -> String {
-    format!("{} 404 Not Found\r\n\r\n", version)
+fn not_found(version: String) -> Vec<u8> {
+    format!("{} 404 Not Found\r\n\r\n", version).into_bytes()
 }
 
-fn file_response(request: HTTPRequest) -> String {
+fn file_response(request: HTTPRequest) -> Vec<u8> {
     let directory = get_directory();
     match directory {
         Some(dir) => {
@@ -71,7 +71,7 @@ fn file_response(request: HTTPRequest) -> String {
     }
 }
 
-fn get_file_response(request: HTTPRequest, path: String) -> String {
+fn get_file_response(request: HTTPRequest, path: String) -> Vec<u8> {
     let mut buf = String::new();
     let file = File::open(path);
 
@@ -87,13 +87,13 @@ fn get_file_response(request: HTTPRequest, path: String) -> String {
     }
 }
 
-fn create_file_response(request: HTTPRequest, path: String) -> String {
+fn create_file_response(request: HTTPRequest, path: String) -> Vec<u8> {
     let mut file = File::create(path).unwrap();
     file.write_all(&request.content.into_bytes()).unwrap();
-    format!("{} 201 Created\r\n\r\n", request.version)
+    format!("{} 201 Created\r\n\r\n", request.version).into_bytes()
 }
 
-fn response_200(request: HTTPRequest, body: &String) -> String {
+fn response_200(request: HTTPRequest, body: &String) -> Vec<u8> {
     let encoding = match request.encoding {
         Some(encoding) if !encoding.contains("invalid") && encoding.contains("gzip") => {
             format!("Content-Encoding: {}\r\n", "gzip")
@@ -101,14 +101,26 @@ fn response_200(request: HTTPRequest, body: &String) -> String {
         _ => "".to_string(),
     };
 
-    format!(
-        "{} 200 OK\r\nContent-Type: {}\r\n{}Content-Length: {}\r\n\r\n{}",
+    let body = match encoding.is_empty() {
+        true => body.as_bytes().to_vec(),
+        false => {
+            let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+            encoder.write_all(body.as_bytes()).unwrap();
+            encoder.finish().unwrap()
+        }
+    };
+
+    let headers = format!(
+        "{} 200 OK\r\nContent-Type: {}\r\n{}Content-Length: {}\r\n\r\n",
         request.version,
         request.content_type,
         encoding,
         body.len(),
-        body
-    )
+    );
+
+    let mut response = headers.into_bytes();
+    response.extend_from_slice(&body);
+    response
 }
 
 fn get_request(parts: Vec<&str>) -> HTTPRequest {
