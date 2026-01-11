@@ -95,7 +95,9 @@ fn create_file_response(request: HTTPRequest, path: String) -> String {
 
 fn response_200(request: HTTPRequest, body: &String) -> String {
     let encoding = match request.encoding {
-        Some(encoding) if encoding == "gzip" => format!("Content-Encoding: {}\r\n", encoding),
+        Some(encoding) if !encoding.contains("invalid") && encoding.contains("gzip") => {
+            format!("Content-Encoding: {}\r\n", "gzip")
+        }
         _ => "".to_string(),
     };
 
