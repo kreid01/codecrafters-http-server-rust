@@ -31,14 +31,19 @@ fn extract_url(stream: &mut TcpStream) -> String {
 
     match request.target.as_str() {
         "/" => format!("{} 200 OK\r\n\r\n", request.version),
-        "/echo" => format!(
-            "{} 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
-            request.version,
-            request.body.len(),
-            request.body,
-        ),
+        "/echo" => response_200(request.clone(), &request.body.clone()),
+        "/user-agent" => response_200(request.clone(), &request.headers.user_agent.clone()),
         _ => format!("{} 404 Not Found\r\n\r\n", request.version),
     }
+}
+
+fn response_200(request: HTTPRequest, body: &String) -> String {
+    format!(
+        "{} 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\n\r\n{}",
+        request.version,
+        body.len(),
+        body
+    )
 }
 
 fn get_request(parts: Vec<&str>) -> HTTPRequest {
@@ -46,9 +51,11 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
 
     let request = parts.first().unwrap();
     let headers = parts.get(1).unwrap();
+    let agent = parts.get(2).unwrap();
 
     let request_parts: Vec<&str> = request.split_whitespace().collect();
     let headers_parts: Vec<&str> = headers.split_whitespace().collect();
+    let agent_parts: Vec<&str> = agent.split_whitespace().collect();
 
     let _method = request_parts.first().unwrap();
 
@@ -60,10 +67,15 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
 
     let version = request_parts.get(2).unwrap();
 
+    println!("{:?}", headers_parts);
+
     let host = headers_parts.get(1).unwrap();
+    let user_agent = agent_parts.get(1).unwrap_or(&"").to_string();
 
     let headers = HTTPHeaders {
         host: host.to_string(),
+        user_agent,
+        accept: "".to_string(),
     };
 
     HTTPRequest {
@@ -75,7 +87,7 @@ fn get_request(parts: Vec<&str>) -> HTTPRequest {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HTTPRequest {
     method: HTTPMethod,
     target: String,
@@ -84,14 +96,14 @@ struct HTTPRequest {
     body: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum HTTPMethod {
     Get,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct HTTPHeaders {
     host: String,
-    // user_agent: String,
-    // accept: String,
+    user_agent: String,
+    accept: String,
 }
